@@ -1,0 +1,404 @@
+<!-- Dedicated to God the Father -->
+<!-- All Rights Reserved Christopher Andrew Topalian Copyright 2000-2026 -->
+<!-- https://github.com/ChristopherTopalian -->
+<!-- https://github.com/ChristopherAndrewTopalian -->
+<!-- CATopalian_JS_Volcano_Map.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title> CATopalian JS Volcano Map </title>
+<meta charset="UTF-8">
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<link rel="icon" href="src/media/textures/icons/001.png" type="image/png">
+
+<style>
+
+body
+{
+    background-color: rgb(20, 20, 25);
+    color: white;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    margin: 0px;
+    padding: 0px;
+}
+
+/* INFO HEADER */
+#header_panel {
+    padding: 2px;
+    background-color: rgb(15, 15, 20);
+    text-align: center;
+}
+
+/* MAP CONTAINERS */
+#map_view {
+    width: 1000px;
+    height: 500px;
+    margin: 0px auto; 
+    background-color: rgb(30, 35, 45); 
+    border: 2px solid rgb(100, 100, 120);
+    overflow: hidden; 
+    cursor: grab; 
+}
+
+#map_content {
+    width: 1000px;
+    height: 450px;
+    position: relative;
+    transform-origin: 0 0; 
+}
+
+.volcano_dot {
+    background-color: rgba(255, 140, 0, 0.8); /* Magma Orange */
+    border-radius: 50%; /* Perfect circle for volcanoes */
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    cursor: pointer;
+    transition: transform 0.2s ease, background-color 0.2s ease;
+    transform-origin: center center; 
+}
+
+.volcano_dot:hover {
+    background-color: rgb(255, 255, 0); /* Bright Yellow */
+    border: 2px solid white;
+    transform: scale(1.5); 
+    z-index: 100;
+}
+
+/* LIST VIEW */
+#list_view {
+    position: fixed;
+    left: 0px;
+    bottom: 0px;
+    width: 1000px;
+    height: 100px; 
+    margin: 1px auto;
+    background-color: rgb(25, 25, 30);
+    border: 1px solid rgb(68, 68, 68);
+    overflow-y: scroll; 
+}
+
+.list_row {
+    font-size: 14px;
+    font-weight: bold;
+    padding: 2px;
+    border-bottom: 1px solid rgb(68, 68, 68);
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.list_row:hover {
+    background-color: rgb(50, 50, 50);
+}
+
+.volcano_badge {
+    background-color: rgb(255, 102, 0);
+    color: white;
+    padding: 0px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+</style>
+
+<script>
+
+function ge(id) { return document.getElementById(id); }
+
+function ce(tag) { return document.createElement(tag); }
+
+function ba(element) { document.body.append(element); }
+
+//----//
+
+// sound.js
+
+let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playTone(frequency, duration, waveType, volume, detune, attackTime, releaseTime, panValue)
+{
+    let oscillator = audioCtx.createOscillator();
+    oscillator.type = waveType;
+    oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+    oscillator.detune.setValueAtTime(detune, audioCtx.currentTime);
+
+    let gainNode = audioCtx.createGain();
+    let pannerNode = audioCtx.createStereoPanner();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(pannerNode);
+    pannerNode.connect(audioCtx.destination);
+
+    let durationInSeconds = duration / 1000;
+
+    gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(volume, audioCtx.currentTime + attackTime);
+    gainNode.gain.setValueAtTime(volume, audioCtx.currentTime + durationInSeconds - releaseTime);
+    gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + durationInSeconds);
+    pannerNode.pan.setValueAtTime(panValue, audioCtx.currentTime);
+
+    oscillator.start(audioCtx.currentTime);
+    oscillator.stop(audioCtx.currentTime + durationInSeconds);
+}
+
+function clickSound()
+{
+    playTone(500, 100, 'sine', 0.01, 0, 0.01, 0.1, 0.0);
+}
+
+function hoverSound()
+{
+    playTone(300, 100, 'sine', 0.02, 0, 0.01, 0.01, 0.0);
+}
+
+//----//
+
+function latLonToXY(lat, lon) 
+{
+    let x = (lon + 180.0) * (1000.0 / 360.0);
+    let y = (90.0 - lat) * (500.0 / 180.0);
+    return { x: x, y: y };
+}
+
+function makeInterface() 
+{
+    // Info Header
+    let header = ce('div');
+    header.id = 'header_panel';
+    
+    let countLbl = ce('div');
+    countLbl.id = 'count_lbl';
+    countLbl.textContent = 'Scanning seismic data...';
+    countLbl.style.fontSize = '14px';
+    countLbl.style.fontWeight = 'bold';
+    countLbl.style.color = '#ffcc00';
+    countLbl.style.margin = '0px';
+    header.append(countLbl);
+    ba(header);
+
+    // The Map View
+    let mapView = ce('div');
+    mapView.id = 'map_view';
+    ba(mapView);
+
+    // The Map Content
+    let mapContent = ce('div');
+    mapContent.id = 'map_content';
+    mapView.append(mapContent);
+
+    let mapBg = ce('img');
+    mapBg.src = 'src/media/textures/maps/Earthmap1000x500.jpg';
+    mapBg.style.position = 'absolute';
+    mapBg.style.width = '1000px';
+    mapBg.style.height = '500px';
+    mapBg.style.pointerEvents = 'none'; 
+    mapContent.append(mapBg);
+
+    // The Scrollable List
+    let listView = ce('div');
+    listView.id = 'list_view';
+    ba(listView);
+
+    // Activate the Zoom and Pan Logic
+    setupZoomPan(mapView, mapContent);
+
+    // Fetch the Data
+    loadVolcanoes();
+}
+
+async function loadVolcanoes() 
+{
+    let url = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=VO";
+    
+    try 
+    {
+        let response = await fetch(url);
+        let data = await response.json();
+        let features = data.features || [];
+
+        //-//
+
+        let countLbl = ge('count_lbl');
+        if (features.length === 0) 
+        {
+            countLbl.textContent = "No active eruptions worldwide.";
+        } 
+        else 
+        {
+            countLbl.textContent = "Active Eruptions: " + features.length;
+        }
+
+        //-//
+
+        let mapContent = ge('map_content');
+        let listView = ge('list_view');
+
+        // The Traditional, High-Speed For Loop
+        for (let i = 0; i < features.length; i++) 
+        {
+            let volcano = features[i];
+            
+            let props = volcano.properties;
+            let coords = volcano.geometry.coordinates;
+            
+            let name = props.name || 'Unnamed Volcano';
+            let alert_level = props.alertlevel || 'VO';
+            
+            let lon = coords[0];
+            let lat = coords[1];
+            
+            // Classic Object extraction
+            let xyPos = latLonToXY(lat, lon);
+            let x = xyPos.x;
+            let y = xyPos.y;
+
+            // Create Dot
+            let dot = ce('div');
+            dot.className = 'volcano_dot';
+            dot.title = name + "\nAlert Level: " + alert_level;
+            dot.style.left = Math.floor(x) - 6 + 'px';
+            dot.style.top = Math.floor(y) - 6 + 'px';
+            
+            // Classic String Concatenation
+            let mapsUrl = "https://www.google.com/maps/search/?api=1&query=" + lat + "," + lon;
+            
+            // Create Row
+            let row = ce('div');
+            row.className = 'list_row';
+            row.onclick = function()
+            {
+                clickSound();
+                window.open(mapsUrl);
+                //nw.Shell.openExternal(mapsUrl);
+            };
+
+            let badge = ce('span');
+            badge.className = 'volcano_badge';
+            badge.textContent = "VOLCANO";
+            row.append(badge);
+
+            let info = ce('span');
+            info.textContent = name;
+            info.style.fontSize = '12px';
+            row.append(info);
+
+            // THE BI-DIRECTIONAL SYNC
+
+            // Hover the DOT, Highlight the ROW
+            dot.addEventListener('mouseenter', function()
+            {
+                hoverSound();
+                row.style.backgroundColor = '#333'; 
+                row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            });
+
+            dot.addEventListener('mouseleave', function()
+            {
+                row.style.backgroundColor = ''; 
+            });
+
+            dot.onclick = function()
+            {
+                clickSound();
+                window.open(mapsUrl);
+                //nw.Shell.openExternal(mapsUrl);
+            };
+            
+            mapContent.append(dot);
+            listView.append(row);
+
+            // Hover the ROW, Highlight the DOT
+            row.addEventListener('mouseenter', function()
+            {
+                hoverSound();
+                dot.style.backgroundColor = 'rgb(255, 255, 0)';
+                dot.style.border = '2px solid white';
+                dot.style.transform = 'scale(1.5)';
+                dot.style.zIndex = '100';
+            });
+            
+            row.addEventListener('mouseleave', function()
+            {
+                dot.style.backgroundColor = '';
+                dot.style.border = '';
+                dot.style.transform = '';
+                dot.style.zIndex = '';
+            });
+        }
+    } 
+    catch (err) 
+    {
+        ge('count_lbl').textContent = "Failed to load volcano data.";
+    }
+}
+
+// ZOOM & PAN LOGIC
+function setupZoomPan(view, content) 
+{
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+    let isDragging = false;
+    let startX, startY;
+
+    // Mouse Wheel Zooming
+    view.addEventListener('wheel', function(e)
+    {
+        e.preventDefault(); 
+        
+        let zoomAmount = e.deltaY * -0.001;
+        scale += zoomAmount;
+        
+        scale = Math.min(Math.max(1, scale), 5); 
+        
+        updateTransform();
+    });
+
+    // Mouse Drag Panning
+    view.addEventListener('mousedown', function(e)
+    {
+        isDragging = true;
+        startX = e.clientX - panX;
+        startY = e.clientY - panY;
+        view.style.cursor = 'grabbing';
+    });
+
+    window.addEventListener('mousemove', function(e)
+    {
+        if (!isDragging) return;
+        panX = e.clientX - startX;
+        panY = e.clientY - startY;
+        updateTransform();
+    });
+
+    window.addEventListener('mouseup', function()
+    {
+        isDragging = false;
+        view.style.cursor = 'grab';
+    });
+
+    function updateTransform()
+    {
+        content.style.transform = "translate(" + panX + "px, " + panY + "px) scale(" + scale + ")";
+    }
+}
+
+function whenLoaded()
+{
+    makeInterface();
+}
+
+</script>
+
+</head>
+
+<body onload="whenLoaded()">
+
+</body>
+
+</html>
